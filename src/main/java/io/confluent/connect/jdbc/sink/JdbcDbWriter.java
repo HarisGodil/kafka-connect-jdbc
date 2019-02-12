@@ -14,8 +14,20 @@
 
 package io.confluent.connect.jdbc.sink;
 
+import org.apache.kafka.common.cache.Cache;
+import org.apache.kafka.common.cache.LRUCache;
+import org.apache.kafka.common.cache.SynchronizedCache;
+
+import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+
 import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
+
+//import org.apache.kafka.connect.transforms.util.SchemaUtil;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -26,6 +38,7 @@ import java.util.Map;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.util.CachedConnectionProvider;
 import io.confluent.connect.jdbc.util.TableId;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +49,8 @@ public class JdbcDbWriter {
   private final DatabaseDialect dbDialect;
   private final DbStructure dbStructure;
   final CachedConnectionProvider cachedConnectionProvider;
+
+  private Cache<Schema, Schema> schemaUpdateCache;
 
   JdbcDbWriter(final JdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure) {
     this.config = config;
@@ -49,6 +64,8 @@ public class JdbcDbWriter {
         connection.setAutoCommit(false);
       }
     };
+
+    this.schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
   }
 
   void write(final Collection<SinkRecord> records) throws SQLException {
@@ -56,13 +73,15 @@ public class JdbcDbWriter {
 
     final Map<TableId, BufferedRecords> bufferByTable = new HashMap<>();
     for (SinkRecord record : records) {
-      final TableId tableId = destinationTable(record.topic());
+      SinkRecord flattenedRecord = processRecord(record);
+
+      final TableId tableId = destinationTable(flattenedRecord.topic());
       BufferedRecords buffer = bufferByTable.get(tableId);
       if (buffer == null) {
         buffer = new BufferedRecords(config, tableId, dbDialect, dbStructure, connection);
         bufferByTable.put(tableId, buffer);
       }
-      buffer.add(record);
+      buffer.add(flattenedRecord);
     }
     for (Map.Entry<TableId, BufferedRecords> entry : bufferByTable.entrySet()) {
       TableId tableId = entry.getKey();
@@ -73,6 +92,157 @@ public class JdbcDbWriter {
     }
     connection.commit();
   }
+
+  SinkRecord processRecord(SinkRecord record) {
+    // For our use case, there is no Key, so we will only operate on the value portion
+    Struct value = (Struct) record.value();
+
+    // We will demux based on the only set inner metric
+    String inner = findInnerMetric( value );
+
+    // Create flattened schema, dropping top level structs that aren't inner
+    Schema updatedSchema = flattenSchema( value, inner );
+
+    final Struct updatedValue = new Struct(updatedSchema);
+    buildWithSchema(value, "", updatedValue, inner);
+
+    return record.newRecord(record.topic() + "_" + inner,
+                            record.kafkaPartition(),
+                            record.keySchema(),
+                            record.key(),
+                            updatedSchema,
+                            updatedValue,
+                            record.timestamp()
+                           );
+
+  }
+
+  String findInnerMetric(Struct record) {
+    // maybe ensure only one is set? this will slow down this connector
+    for (Field field : record.schema().fields()) {
+      if ( field.schema().type() != Schema.Type.STRUCT ) {
+        continue;
+      }
+      if ( record.get(field) != null ) {
+        return field.name();
+      }
+    }
+
+    return null;
+  }
+
+  Schema flattenSchema(Struct value, String inner) {
+    Schema updatedSchema = schemaUpdateCache.get(value.schema());
+    if (updatedSchema == null) {
+      final SchemaBuilder builder = copySchemaBasics(value.schema(), SchemaBuilder.struct());
+      //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(value.schema(), SchemaBuilder.struct());
+      Struct defaultValue = (Struct) value.schema().defaultValue();
+      buildUpdatedSchema(value.schema(), "", builder, value.schema().isOptional(), defaultValue, inner);
+      updatedSchema = builder.build();
+      schemaUpdateCache.put(value.schema(), updatedSchema);
+    }
+
+    return updatedSchema;
+  }
+
+  void buildUpdatedSchema(Schema schema, String fieldNamePrefix, SchemaBuilder newSchema, boolean optional, Struct defaultFromParent, String inner) {
+    for (Field field : schema.fields()) {
+      final String fieldName = fieldName(fieldNamePrefix, field.name());
+      final boolean fieldIsOptional = optional || field.schema().isOptional();
+      Object fieldDefaultValue = null;
+      if (field.schema().defaultValue() != null) {
+        fieldDefaultValue = field.schema().defaultValue();
+      } else if (defaultFromParent != null) {
+        fieldDefaultValue = defaultFromParent.get(field);
+      }
+      switch (field.schema().type()) {
+        case INT8:
+        case INT16:
+        case INT32:
+        case INT64:
+        case FLOAT32:
+        case FLOAT64:
+        case BOOLEAN:
+        case STRING:
+        case BYTES:
+          newSchema.field(fieldName, convertFieldSchema(field.schema(), fieldIsOptional, fieldDefaultValue));
+          break;
+        case STRUCT:
+          // Only generate the schema for the fields that will make it to this demuxed table
+          // i.e. for inner, and sub-structs of inner
+          if ( fieldName.equals(inner) || fieldNamePrefix != "" ) {
+            buildUpdatedSchema(field.schema(), fieldName, newSchema, fieldIsOptional, (Struct) fieldDefaultValue, inner);
+          }
+          break;
+        default:
+          throw new DataException("Flatten transformation does not support " + field.schema().type()
+                + " for record without schemas (for field " + fieldName + ").");
+      }
+    }
+  }
+
+  private Schema convertFieldSchema(Schema orig, boolean optional, Object defaultFromParent) {
+    // Note that we don't use the schema translation cache here. It might save us a bit of effort, but we really
+    // only care about caching top-level schema translations.
+    final SchemaBuilder builder = copySchemaBasics(orig);
+    //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(orig);
+    if (optional)
+      builder.optional();
+    if (defaultFromParent != null)
+      builder.defaultValue(defaultFromParent);
+    return builder.build();
+  }
+
+  void buildWithSchema(Struct record, String fieldNamePrefix, Struct newRecord, String inner) {
+    for (Field field : record.schema().fields()) {
+      final String fieldName = fieldName(fieldNamePrefix, field.name());
+      switch (field.schema().type()) {
+        case INT8:
+        case INT16:
+        case INT32:
+        case INT64:
+        case FLOAT32:
+        case FLOAT64:
+        case BOOLEAN:
+        case STRING:
+        case BYTES:
+          newRecord.put(fieldName, record.get(field));
+          break;
+        case STRUCT:
+          // Only propagate the fields that will make it to this demuxed table
+          // i.e. for inner, and sub-structs of inner
+          if ( fieldName.equals(inner) || fieldNamePrefix != "" ) {
+            buildWithSchema(record.getStruct(field.name()), fieldName, newRecord, inner);
+          }
+          break;
+        default:
+          throw new DataException("Flatten transformation does not support " + field.schema().type()
+                + " for record without schemas (for field " + fieldName + ").");
+      }
+    }
+  }
+
+  public static SchemaBuilder copySchemaBasics(Schema source) {
+    return copySchemaBasics(source, new SchemaBuilder(source.type()));
+  }
+
+  public static SchemaBuilder copySchemaBasics(Schema source, SchemaBuilder builder) {
+    builder.name(source.name());
+    builder.version(source.version());
+    builder.doc(source.doc());
+
+    final Map<String, String> params = source.parameters();
+    if (params != null) {
+      builder.parameters(params);
+    }
+
+    return builder;
+  }
+
+  private String fieldName(String prefix, String fieldName) {
+    return prefix.isEmpty() ? fieldName : (prefix + "." + fieldName);
+  }
+
 
   void closeQuietly() {
     cachedConnectionProvider.close();

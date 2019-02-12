@@ -34,3 +34,21 @@ This project is licensed under the [Confluent Community License](LICENSE).
 
 
 [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bhttps%3A%2F%2Fgithub.com%2Fconfluentinc%2Fkafka-connect-jdbc.svg?type=large)](https://app.fossa.io/projects/git%2Bhttps%3A%2F%2Fgithub.com%2Fconfluentinc%2Fkafka-connect-jdbc?ref=badge_large)
+
+# Steps To Build
+
+- install latest version of gradle https://gradle.org/install/ (apt-get is too far behind)
+
+- clone https://github.com/confluentinc/kafka
+- ```cd kafka
+git checkout 5.1.1-post
+/opt/gradle/*/bin/gradle
+./gradlew installAll```
+
+- clone https://github.com/confluentinc/common
+- ```cd common
+git checkout 5.1.1-post
+mvn clean install```
+
+- (back to this repo)
+- ```mvn clean package -Dcheckstyle.skip=true -Dmaven.test.skip=true -P standalone```
