@@ -50,7 +50,7 @@ public class JdbcDbWriter {
   private final DbStructure dbStructure;
   final CachedConnectionProvider cachedConnectionProvider;
 
-  private Cache<Schema, Schema> schemaUpdateCache;
+  private Cache<String, Schema> schemaUpdateCache;
 
   JdbcDbWriter(final JdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure) {
     this.config = config;
@@ -65,7 +65,7 @@ public class JdbcDbWriter {
       }
     };
 
-    this.schemaUpdateCache = new SynchronizedCache<>(new LRUCache<Schema, Schema>(16));
+    this.schemaUpdateCache = new SynchronizedCache<>(new LRUCache<String, Schema>(16));
   }
 
   void write(final Collection<SinkRecord> records) throws SQLException {
@@ -132,14 +132,14 @@ public class JdbcDbWriter {
   }
 
   Schema flattenSchema(Struct value, String inner) {
-    Schema updatedSchema = schemaUpdateCache.get(value.schema());
+    Schema updatedSchema = schemaUpdateCache.get(inner);
     if (updatedSchema == null) {
       final SchemaBuilder builder = copySchemaBasics(value.schema(), SchemaBuilder.struct());
       //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(value.schema(), SchemaBuilder.struct());
       Struct defaultValue = (Struct) value.schema().defaultValue();
       buildUpdatedSchema(value.schema(), "", builder, value.schema().isOptional(), defaultValue, inner);
       updatedSchema = builder.build();
-      schemaUpdateCache.put(value.schema(), updatedSchema);
+      schemaUpdateCache.put(inner, updatedSchema);
     }
 
     return updatedSchema;
