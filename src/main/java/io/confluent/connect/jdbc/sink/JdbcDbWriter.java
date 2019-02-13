@@ -165,7 +165,7 @@ public class JdbcDbWriter {
         case BOOLEAN:
         case STRING:
         case BYTES:
-          newSchema.field(fieldName, convertFieldSchema(field.schema(), fieldIsOptional, fieldDefaultValue));
+          newSchema.field(fieldName, convertFieldSchema(fieldName, field.schema(), fieldIsOptional, fieldDefaultValue));
           break;
         case STRUCT:
           // Only generate the schema for the fields that will make it to this demuxed table
@@ -181,10 +181,14 @@ public class JdbcDbWriter {
     }
   }
 
-  private Schema convertFieldSchema(Schema orig, boolean optional, Object defaultFromParent) {
+  private Schema convertFieldSchema(String fieldName, Schema orig, boolean optional, Object defaultFromParent) {
     // Note that we don't use the schema translation cache here. It might save us a bit of effort, but we really
     // only care about caching top-level schema translations.
-    final SchemaBuilder builder = copySchemaBasics(orig);
+
+    final SchemaBuilder builder = fieldName.equals("timestamp")
+                                    ? copySchemaBasics(orig, new SchemaBuilder(Schema.Type.FLOAT64))
+                                    : copySchemaBasics(orig);
+
     //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(orig);
     if (optional)
       builder.optional();
@@ -204,7 +208,7 @@ public class JdbcDbWriter {
           // Kafka wants epoch to milisec, but grafana wants epoch to sec
           // Lets just fix it here in the new record
           if (fieldName.equals("timestamp")) {
-            Long adjustedEpoch = (Long) record.get(field) / 1000;
+            Double adjustedEpoch = (Long) record.get(field) / 1000.0;
             newRecord.put(fieldName, adjustedEpoch);
             break;
           }
