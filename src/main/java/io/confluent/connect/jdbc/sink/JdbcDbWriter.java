@@ -201,6 +201,13 @@ public class JdbcDbWriter {
         case INT16:
         case INT32:
         case INT64:
+          // Kafka wants epoch to milisec, but grafana wants epoch to sec
+          // Lets just fix it here in the new record
+          if (fieldName.equals("timestamp")) {
+            Long adjustedEpoch = (Long) record.get(field) / 1000;
+            newRecord.put(fieldName, adjustedEpoch);
+            break;
+          }
         case FLOAT32:
         case FLOAT64:
         case BOOLEAN:
