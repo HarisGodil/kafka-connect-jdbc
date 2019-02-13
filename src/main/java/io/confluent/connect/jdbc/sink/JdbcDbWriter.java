@@ -104,7 +104,7 @@ public class JdbcDbWriter {
     Schema updatedSchema = flattenSchema( value, inner );
 
     final Struct updatedValue = new Struct(updatedSchema);
-    buildWithSchema(value, "", updatedValue, inner);
+    buildWithSchema(value, null, updatedValue, inner);
 
     return record.newRecord(record.topic() + "_" + inner,
                             record.kafkaPartition(),
@@ -137,7 +137,7 @@ public class JdbcDbWriter {
       final SchemaBuilder builder = copySchemaBasics(value.schema(), SchemaBuilder.struct());
       //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(value.schema(), SchemaBuilder.struct());
       Struct defaultValue = (Struct) value.schema().defaultValue();
-      buildUpdatedSchema(value.schema(), "", builder, value.schema().isOptional(), defaultValue, inner);
+      buildUpdatedSchema(value.schema(), null, builder, value.schema().isOptional(), defaultValue, inner);
       updatedSchema = builder.build();
       schemaUpdateCache.put(inner, updatedSchema);
     }
@@ -170,8 +170,8 @@ public class JdbcDbWriter {
         case STRUCT:
           // Only generate the schema for the fields that will make it to this demuxed table
           // i.e. for inner, and sub-structs of inner
-          if ( fieldName.equals(inner) || fieldNamePrefix != "" ) {
-            buildUpdatedSchema(field.schema(), fieldName, newSchema, fieldIsOptional, (Struct) fieldDefaultValue, inner);
+          if ( fieldName.equals(inner) || fieldNamePrefix != null ) {
+            buildUpdatedSchema(field.schema(), newPrefix(fieldNamePrefix, fieldName), newSchema, fieldIsOptional, (Struct) fieldDefaultValue, inner);
           }
           break;
         default:
@@ -222,8 +222,8 @@ public class JdbcDbWriter {
         case STRUCT:
           // Only propagate the fields that will make it to this demuxed table
           // i.e. for inner, and sub-structs of inner
-          if ( fieldName.equals(inner) || fieldNamePrefix != "" ) {
-            buildWithSchema(record.getStruct(field.name()), fieldName, newRecord, inner);
+          if ( fieldName.equals(inner) || fieldNamePrefix != null ) {
+            buildWithSchema(record.getStruct(field.name()), newPrefix(fieldNamePrefix, fieldName), newRecord, inner);
           }
           break;
         default:
@@ -251,7 +251,11 @@ public class JdbcDbWriter {
   }
 
   private String fieldName(String prefix, String fieldName) {
-    return prefix.isEmpty() ? fieldName : (prefix + "." + fieldName);
+    return (prefix == null || prefix.isEmpty()) ? fieldName : (prefix + "." + fieldName);
+  }
+
+  private String newPrefix(String oldPrefix, String fieldName) {
+    return oldPrefix == null ? "" : (oldPrefix + "." + fieldName);
   }
 
 
