@@ -39,12 +39,14 @@ This project is licensed under the [Confluent Community License](LICENSE).
 
 - install latest version of gradle https://gradle.org/install/ (apt-get is too far behind)
 
+( only needs to be done once )
 - clone https://github.com/confluentinc/kafka
 - ```cd kafka
 git checkout 5.1.1-post
 /opt/gradle/*/bin/gradle
 ./gradlew installAll```
 
+( only needs to be done once )
 - clone https://github.com/confluentinc/common
 - ```cd common
 git checkout 5.1.1-post
@@ -52,3 +54,6 @@ mvn clean install```
 
 - (back to this repo)
 - ```mvn clean package -Dcheckstyle.skip=true -Dmaven.test.skip=true -P standalone```
+
+- copy target/kafka-connect-*-standalone.jar to tools/dataz/docker/connect
+
