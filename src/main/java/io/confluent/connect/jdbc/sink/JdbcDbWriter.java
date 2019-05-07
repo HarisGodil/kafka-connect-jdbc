@@ -167,6 +167,12 @@ public class JdbcDbWriter {
         case BYTES:
           newSchema.field(fieldName, convertFieldSchema(fieldName, field.schema(), fieldIsOptional, fieldDefaultValue));
           break;
+        case MAP:
+          newSchema.field(fieldName, setupBuilder(SchemaBuilder.map(field.schema().keySchema(), field.schema().valueSchema()), fieldIsOptional, fieldDefaultValue));
+          break;
+        case ARRAY:
+          newSchema.field(fieldName, setupBuilder(SchemaBuilder.array(field.schema().valueSchema()), fieldIsOptional, fieldDefaultValue));
+          break;
         case STRUCT:
           // Only generate the schema for the fields that will make it to this demuxed table
           // i.e. for inner, and sub-structs of inner
@@ -175,7 +181,7 @@ public class JdbcDbWriter {
           }
           break;
         default:
-          throw new DataException("Flatten transformation does not support " + field.schema().type()
+          throw new DataException("buildUpdatedSchema Flatten transformation does not support " + field.schema().type()
                 + " for record without schemas (for field " + fieldName + ").");
       }
     }
@@ -188,7 +194,10 @@ public class JdbcDbWriter {
     final SchemaBuilder builder = fieldName.equals("timestamp")
                                     ? copySchemaBasics(orig, new SchemaBuilder(Schema.Type.FLOAT64))
                                     : copySchemaBasics(orig);
+    return setupBuilder(builder, optional, defaultFromParent);
+  }
 
+  private Schema setupBuilder(SchemaBuilder builder, boolean optional, Object defaultFromParent) {
     //final SchemaBuilder builder = SchemaUtil.copySchemaBasics(orig);
     if (optional)
       builder.optional();
@@ -217,6 +226,8 @@ public class JdbcDbWriter {
         case BOOLEAN:
         case STRING:
         case BYTES:
+        case MAP:
+        case ARRAY:
           newRecord.put(fieldName, record.get(field));
           break;
         case STRUCT:
@@ -227,7 +238,7 @@ public class JdbcDbWriter {
           }
           break;
         default:
-          throw new DataException("Flatten transformation does not support " + field.schema().type()
+          throw new DataException("buildWithSchema Flatten transformation does not support " + field.schema().type()
                 + " for record without schemas (for field " + fieldName + ").");
       }
     }
