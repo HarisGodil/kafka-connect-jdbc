@@ -5,6 +5,7 @@ target/
 *.iml
 .idea/
 .ipr
+**/*.swp
 
 # Documentation build output
 /docs/_build
