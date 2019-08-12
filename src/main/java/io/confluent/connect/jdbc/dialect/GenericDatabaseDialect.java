@@ -88,6 +88,10 @@ import io.confluent.connect.jdbc.util.QuoteMethod;
 import io.confluent.connect.jdbc.util.TableDefinition;
 import io.confluent.connect.jdbc.util.TableId;
 
+import com.google.gson.Gson;
+
+import org.postgresql.util.PGobject;
+
 /**
  * A {@link DatabaseDialect} implementation that provides functionality based upon JDBC and SQL.
  *
@@ -1467,6 +1471,18 @@ public class GenericDatabaseDialect implements DatabaseDialect {
         break;
       case STRING:
         statement.setString(index, (String) value);
+        break;
+      case MAP:
+        PGobject jsonMap = new PGobject();
+        jsonMap.setType("json");
+        jsonMap.setValue( new Gson().toJson((HashMap) value) );
+        statement.setObject(index, jsonMap);
+        break;
+      case ARRAY:
+        PGobject jsonArr = new PGobject();
+        jsonArr.setType("json");
+        jsonArr.setValue( new Gson().toJson((List) value) );
+        statement.setObject(index, jsonArr);
         break;
       case BYTES:
         final byte[] bytes;

@@ -210,6 +210,9 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
         return "TEXT";
       case BYTES:
         return "BYTEA";
+      case MAP:
+      case ARRAY:
+        return JSONB_TYPE_NAME;
       default:
         return super.getSqlType(field);
     }
