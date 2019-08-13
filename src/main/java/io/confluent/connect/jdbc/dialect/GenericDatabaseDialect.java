@@ -15,11 +15,13 @@
 package io.confluent.connect.jdbc.dialect;
 
 import java.time.ZoneOffset;
+import java.util.Iterator;
 import java.util.TimeZone;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -1441,6 +1443,21 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     }
   }
 
+  protected Object processDbObject(Object o) {
+    // Structs do not get processed properly, so lets make it something that Gson understands
+    if (o instanceof Struct) {
+      Struct s = (Struct) o;
+      HashMap<String, Object> elem = new HashMap<String, Object>();
+      for (Field f : s.schema().fields()) {
+        elem.put(f.name(), s.get(f));
+      }
+      return elem;
+    // Primitives are processed properly already, so lets do a no-op
+    } else {
+      return o;
+    }
+  }
+
   protected boolean maybeBindPrimitive(
       PreparedStatement statement,
       int index,
@@ -1474,14 +1491,33 @@ public class GenericDatabaseDialect implements DatabaseDialect {
         break;
       case MAP:
         PGobject jsonMap = new PGobject();
+
+        // Gson doesn't know how to process a Struct, so lets make the Structs into HashMaps
+        // As of writing this, keys have to be Strings, but it looks like people want to change
+        // this, so I am future proofing this bit of code
+        HashMap<Object, Object> processedMap = new HashMap<Object, Object>();
+        Set set = ((HashMap<?,?>) value).entrySet();
+        Iterator iterator = set.iterator();
+        while(iterator.hasNext()) {
+          Map.Entry entry = (Map.Entry)iterator.next();
+          processedMap.put( processDbObject(entry.getKey()), processDbObject(entry.getValue()) );
+        }
+
         jsonMap.setType("json");
-        jsonMap.setValue( new Gson().toJson((HashMap) value) );
+        jsonMap.setValue( new Gson().toJson(processedMap) );
         statement.setObject(index, jsonMap);
         break;
       case ARRAY:
         PGobject jsonArr = new PGobject();
+
+        // Gson doesn't know how to process a Struct, so lets make the Structs into HashMaps
+        List<Object> processedArr = new ArrayList<Object>();
+        for (Object o : (List<?>) value) {
+          processedArr.add( processDbObject(o) );
+        }
+
         jsonArr.setType("json");
-        jsonArr.setValue( new Gson().toJson((List) value) );
+        jsonArr.setValue( new Gson().toJson(processedArr) );
         statement.setObject(index, jsonArr);
         break;
       case BYTES:
