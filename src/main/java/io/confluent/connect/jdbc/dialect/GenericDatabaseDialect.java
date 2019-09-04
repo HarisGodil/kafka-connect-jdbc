@@ -1577,6 +1577,64 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   }
 
   @Override
+  public String maybeBuildFlutterView(
+      TableId table,
+      Collection<SinkRecordField> fields
+  ) {
+    for (SinkRecordField field : fields) {
+      if (field.name().equals("data") && field.schemaType() == Schema.Type.ARRAY) {
+        ExpressionBuilder builder = expressionBuilder();
+        // Is surrounding this in quotes necessary
+        builder.append("CREATE VIEW \"");
+        builder.append(table.tableName());
+        builder.append("_flattened\" AS SELECT timestamp, thread_id, log_level, env_role");
+        for (Field inner_field : field.innerFields()) {
+          builder.append(", (d->>'");
+          builder.append(inner_field.name());
+          builder.append("')::");
+
+          // Allow the subset of fields we expect to see in a flutter
+          switch(inner_field.schema().type()) {
+            case INT8:
+            case INT16:
+              builder.append("SMALLINT");
+              break;
+            case INT32:
+              builder.append("INT");
+              break;
+            case INT64:
+              builder.append("BIGINT");
+              break;
+           case FLOAT32:
+              builder.append("REAL");
+              break;
+           case FLOAT64:
+              builder.append("DOUBLE");
+              break;
+            case BOOLEAN:
+              builder.append("BOOLEAN");
+              break;
+            case STRING:
+              builder.append("TEXT");
+              break;
+            default:
+              log.info("Flutter Demux Error -- Bad type found: " + inner_field.schema().type() + " for field " + field.name());
+              return null;
+          }
+
+          builder.append(" as ");
+          builder.append(inner_field.name());
+        }
+        builder.append(" FROM ");
+        builder.append(table);
+        builder.append(", jsonb_array_elements(data) d");
+        return builder.toString();
+      }
+    }
+    return null;
+  }
+
+  @Override
   public String buildCreateTableStatement(
       TableId table,
       Collection<SinkRecordField> fields

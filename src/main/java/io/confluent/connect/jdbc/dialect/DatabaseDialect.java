@@ -369,6 +369,15 @@ public interface DatabaseDialect extends ConnectionProvider {
   String buildDropTableStatement(TableId table, DropOptions options);
 
   /**
+   * Build the CREATE VIEW statement expression for the given table and its columns (only relevant for flutters)
+   *
+   * @param table  the identifier of the table; may not be null
+   * @param fields the information about the fields in the sink records; may not be null
+   * @return the CREATE TABLE statement; will be null if the table isn't a flutter (and doesn't need demuxing)
+   */
+  String maybeBuildFlutterView(TableId table, Collection<SinkRecordField> fields);
+
+  /**
    * Build the CREATE TABLE statement expression for the given table and its columns.
    *
    * @param table  the identifier of the table; may not be null

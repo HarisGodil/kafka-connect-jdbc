@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -87,9 +88,17 @@ public class DbStructure {
           String.format("Table %s is missing and auto-creation is disabled", tableId)
       );
     }
-    String sql = dbDialect.buildCreateTableStatement(tableId, fieldsMetadata.allFields.values());
-    log.info("Creating table with sql: {}", sql);
-    dbDialect.applyDdlStatements(connection, Collections.singletonList(sql));
+    String createTableSql = dbDialect.buildCreateTableStatement(tableId, fieldsMetadata.allFields.values());
+    java.util.List<String> sqls = new ArrayList<String>();
+    sqls.add(createTableSql);
+
+    String flutterViewSql = dbDialect.maybeBuildFlutterView(tableId, fieldsMetadata.allFields.values());
+    if (flutterViewSql != null) {
+      sqls.add(flutterViewSql);
+    }
+
+    log.info("Creating table with sql: {}", sqls);
+    dbDialect.applyDdlStatements(connection, sqls);
   }
 
   /**
