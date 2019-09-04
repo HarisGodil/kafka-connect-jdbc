@@ -14,8 +14,10 @@
 
 package io.confluent.connect.jdbc.sink.metadata;
 
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 
+import java.util.List;
 import java.util.Map;
 
 public class SinkRecordField {
@@ -56,6 +58,10 @@ public class SinkRecordField {
 
   public boolean isPrimaryKey() {
     return isPrimaryKey;
+  }
+
+  public List<Field> innerFields() {
+    return schema.valueSchema().fields();
   }
 
   @Override
